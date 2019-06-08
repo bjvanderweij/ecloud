@@ -20,3 +20,65 @@ A task consists of four sets of commands:
 * running the task
 * uploading the results to the datastore
 * cleaning up
+
+`pop-task.py`, `hello.py`, `completed-task.py` are a poor man's server endpoints that are called by workers over ssh.
+
+# Setup
+
+Worker template need BOSS public key
+Worker template need DATAstore public key
+
+Set BOSS contextualization to use your public key
+Login to boss
+Check database
+```python admin.py status```
+Check boss and datastore address
+```python admin.py show_context```
+Boss address can be set automatically, provided that the right boss template is configured in settings.py.
+However, for that to happen, boss_address needs to not be present in the Context table.
+So
+```python admin.py drop_context```
+Set the datastore address
+```python admin.py set_datastore <datastore_ip>```
+
+The flow for creating and running tasks is as follows:
+
+1. Create a list of tasks locally and upload to boss
+2. Load the tasks with push-tasks.py
+
+```
+python push-tasks.py <tasks-file.json>
+```
+
+3. Instantiate workers 
+
+```
+python admin.py instantiate_worker [<num-workers>]
+```
+
+4. Wait for workers to come online. If this happens, show_workers will show their IP.
+
+```
+python admin.py instantiate_worker [<num-workers>]
+```
+
+If this doesn't happen soon after opennebula reports the worker to be running, investigate by logging into the worker from Boss, and run `./debug.sh`, which will run the worker's startup script while printing every command.
+
+6. Monitor progress with status
+
+
+
+
+# Settings.py
+
+Configuring datastore and worker templates
+
+# The database:
+
+Tasks, Workers, Context
+
+## Context:
+
+datastore
+boss_address
+(automatically set throught the ONE api)
