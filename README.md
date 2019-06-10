@@ -30,7 +30,14 @@ Worker template need DATAstore public key
 
 Set BOSS contextualization to use your public key
 Login to boss
-Check database
+Install python3.7 git mysql mosqitto
+Setup mysql and add database
+Configure settings.py
+Create virtualenv
+Open port 1883 in firewall
+```sudo ufw allow 1883```
+
+Check what's in the database
 ```python admin.py status```
 Check boss and datastore address
 ```python admin.py show_context```

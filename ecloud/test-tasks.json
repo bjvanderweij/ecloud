@@ -1,0 +1,8 @@
+[
+	{"key":"0", "cmd":"echo I should fail to fetch dependencies.", "results":[], "requires":["non-existent-file"]},
+	{"key":"1", "cmd":"echo I should fail because of unmet dependencies.", "results":[], "depends-on":["0"]},
+	{"key":"2", "cmd":["echo I should fail", ">&2 echo This error message should end up in the log.", "exit 1"], "results":[]},
+	{"key":"3", "cmd":["echo 3.42 > intermediate-result"], "results":["intermediate-result"]},
+	{"key":"4", "cmd":["sleep 3", "mv dependency result"], "results":[["result", "TEST_SUCCEEDED"]], "depends-on":["3"], "requires":[["intermediate-result", "dependency"]]}
+]
+ 

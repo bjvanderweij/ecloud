@@ -1,5 +1,5 @@
 import argparse, json, pyone, os, settings, time
-import ecloud.ecloud
+import ecloud
 from hashlib import md5
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 import argparse, settings, sys 
-import ecloud.ecloud
+import ecloud
 
 if __name__ == '__main__':
 

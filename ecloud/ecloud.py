@@ -1,6 +1,6 @@
 import settings, pyone, subprocess, tempfile, os, time, warnings, traceback 
 from pony.orm import db_session, select, commit
-from ecloud.ecdb import Task, TaskResult, FileTransfer, Worker, Context, TaskCommand
+from ecdb import Task, TaskResult, FileTransfer, Worker, Context, TaskCommand
 from xmlrpc.client import ProtocolError
 # sending mail
 import smtplib
@@ -12,7 +12,7 @@ from email.utils import COMMASPACE, formatdate
 
 # DECORATORS
 
-def retry_on_exception(exception, sleep=10, max_attempts=10):
+def retry_on_exception(exception, sleep=1, max_attempts=10):
 
     def decorator(f):
 
@@ -29,9 +29,6 @@ def retry_on_exception(exception, sleep=10, max_attempts=10):
         return wrapper
 
     return decorator
-
-
-# FUNCTIONS
 
 def get_one_server():
 
@@ -89,22 +86,14 @@ def add_as_succeeded(task, merge_strategy=None):
     return t
 
 @db_session()
-def get_queued_tasks():
+def get_tasks(status):
+    return select(t for t in Task if t.status == status)[:]
 
-    return select(t for t in Task if t.status == Task.QUEUED)[:]
-
-@db_session()
-def get_finished_tasks():
-
-    return select(t for t in Task if t.status == Task.FINISHED)[:]
-
-@db_session()
 def get_available_tasks():
 
-    tasks = get_queued_tasks()
+    tasks = get_tasks(Task.QUEUED)
     return (t for t in tasks if t.available)
 
-@db_session()
 def get_available_task():
 
    return next(get_available_tasks(), None)
@@ -124,9 +113,9 @@ def failed_to_queue():
         task.status = Task.QUEUED
 
 @db_session()
-def create_worker(worker_id):
+def create_worker(worker_id, one_id, keep_alive):
 
-    return Worker(worker_id=worker_id)
+    return Worker(worker_id=worker_id, one_id=one_id, keep_alive=keep_alive)
 
 @db_session()
 def mark_failed_tasks():
@@ -156,17 +145,23 @@ def get_worker(worker_id):
 
     return Worker.get(worker_id=worker_id)
 
-@retry_on_exception(ProtocolError, sleep=10, max_attempts=settings.MAX_API_ATTEMPTS)
-def instantiate_worker(one, boss_address):
+#@retry_on_exception(ProtocolError, sleep=1, max_attempts=settings.MAX_API_ATTEMPTS)
+#def instantiate_datastore(one, boss_address):
+#
+#    worker_id = one.template.instantiate(settings.DATASTORE_TEMPLATE, '', False, {}, False)
+
+@retry_on_exception(ProtocolError, sleep=1, max_attempts=settings.MAX_API_ATTEMPTS)
+def instantiate_worker_vm(one, boss_address, keep_alive=False):
 
     template = settings.WORKER_TEMPLATE
     context = one.template.info(template).TEMPLATE['CONTEXT']
     context['START_SCRIPT'] += '\necho "%s" > /home/ubuntu/boss_address' % boss_address
+    context['START_SCRIPT'] += '\necho "%s" >> /home/ubuntu/.ssh' % boss_public_key
     worker_id = one.template.instantiate(settings.WORKER_TEMPLATE, '', False, {'TEMPLATE':{'CONTEXT':context}}, False)
 
-    return create_worker(str(worker_id)).worker_id
+    return worker_id
 
-@retry_on_exception(ProtocolError, sleep=10, max_attempts=settings.MAX_API_ATTEMPTS)
+@retry_on_exception(ProtocolError, sleep=1, max_attempts=settings.MAX_API_ATTEMPTS)
 def terminate_worker(one, worker_id):
 
     one.vm.action('terminate', int(worker_id))
@@ -236,7 +231,7 @@ def finish_task(worker_id, init_exit_code, task_exit_code, finalize_exit_code):
     task = Task.get(lambda t: t.worker.worker_id == worker_id and t.status == Task.IN_PROGRESS)
     task.finish(init_exit_code, task_exit_code, finalize_exit_code)
 
-def find_boss(one):
+def get_boss_address(one):
 
     p = subprocess.Popen(['hostname', '-I'], stdout=subprocess.PIPE)
     addresses = tuple(s.strip() for s in p.stdout.read().decode().strip().split(' '))
@@ -254,16 +249,6 @@ def find_boss(one):
         if ip in addresses:
             return ip
 
-@db_session()
-def get_boss_address(one):
-
-    boss_address = Context.get(key='boss_address')
-    if boss_address is None:
-        address = find_boss(one)
-        boss_address = Context(key='boss_address', value=address)
-
-    return boss_address.value
-
 def get_worker_id_by_ip(one, worker_ip):
 
     workers = get_vms_by_template(one, str(settings.WORKER_TEMPLATE))
@@ -278,7 +263,7 @@ def get_worker_id_by_ip(one, worker_ip):
         if ip == worker_ip:
             return str(worker.ID)
 
-@retry_on_exception(ProtocolError, sleep=10, max_attempts=settings.MAX_API_ATTEMPTS)
+@retry_on_exception(ProtocolError, sleep=1, max_attempts=settings.MAX_API_ATTEMPTS)
 def get_vms_by_template(one, template):
 
     vmpool = one.vmpool.info(-4, -1, -1, -1)
@@ -290,12 +275,6 @@ def keep_worker_alive(worker_id, reason=''):
     worker = Worker.get_for_update(worker_id=worker_id)
     worker.keep_alive = True
     worker.pop_task_error = reason
-
-@db_session
-def assign_worker_address(worker_id, address):
-
-    worker = Worker.get_for_update(worker_id=worker_id)
-    worker.ip = address
     
 @db_session()
 def n_available_tasks():

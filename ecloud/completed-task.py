@@ -1,4 +1,4 @@
-import argparse, pyone, settings, ecloud.ecloud
+import argparse, pyone, settings, ecloud
 
 if __name__ == '__main__':
 

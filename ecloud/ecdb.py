@@ -197,7 +197,8 @@ class TaskCommand(db.Entity):
 
 class Worker(db.Entity):
 
-    worker_id = PrimaryKey(str)
+    worker_id = PrimaryKey(int)
+    one_id = Required(int)
     ip = Optional(str)
     tasks = Set('Task')
     keep_alive = Required(bool, default=False)
