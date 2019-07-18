@@ -133,9 +133,9 @@ def show_in_progress():
 
 @db_session()
 @action
-def add_worker(worker_id):
+def add_worker(worker_id, one_id):
     
-    Worker(worker_id=worker_id)
+    Worker(worker_id=worker_id, one_id=one_id)
 
 @db_session()
 @action

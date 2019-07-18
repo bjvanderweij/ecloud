@@ -225,12 +225,6 @@ def get_datastore_file_tree(one):
 
     return file_tree
 
-@db_session
-def finish_task(worker_id, init_exit_code, task_exit_code, finalize_exit_code):
-
-    task = Task.get(lambda t: t.worker.worker_id == worker_id and t.status == Task.IN_PROGRESS)
-    task.finish(init_exit_code, task_exit_code, finalize_exit_code)
-
 def get_boss_address(one):
 
     p = subprocess.Popen(['hostname', '-I'], stdout=subprocess.PIPE)

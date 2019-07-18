@@ -56,18 +56,14 @@ class FileTransfer(db.Entity):
     def definition(self):
         return [self.path, self.destination]
 
-    @property
-    def command(self):
+    def command(self, datastore):
         scp = 'scp -oStrictHostKeyChecking=no'
         source = self.path
         destination = self.destination
-        datastore = Context.get(key='datastore') 
-        if datastore is None:
-            raise ECloudError('Boss address needs to be set before send command can be generated.')
         if self.direction == self.DATASTORE_TO_WORKER:
-            source = '%s:%s' % (datastore.value, os.path.join(settings.DATASTORE_DIR, source))
+            source = '%s:%s' % (datastore, os.path.join(settings.DATASTORE_DIR, source))
         else:
-            destination = '%s:%s' % (datastore.value, os.path.join(settings.DATASTORE_DIR, destination))
+            destination = '%s:%s' % (datastore, os.path.join(settings.DATASTORE_DIR, destination))
         return '%s "%s" "%s"' % (scp, source, destination)
 
 class Task(db.Entity):
@@ -121,44 +117,31 @@ class Task(db.Entity):
         self.worker = worker
         self.status = self.IN_PROGRESS
 
-    def finish(self, init_exit_code, task_exit_code, finalize_exit_code):
+    def finish(self, success, info):
 
-        success = (init_exit_code == 0) and (task_exit_code == 0) and (finalize_exit_code == 0)
-        reason = ''
-        if not success:
-            reason = (
-                'Fetching required files failed' if init_exit_code != 0 else
-                'Task failed' if task_exit_code != 0 else
-                'Uploading results failed'
-            )
-        result = TaskResult(success=success, exit_code=task_exit_code, task=self, reason=reason)
+        result = TaskResult(success=success, task=self, reason=info)
         self.result = result
         self.status = self.FINISHED
 
-    @property
-    def initialize(self):
+    def initialize(self, datastore):
     
         datastore_to_worker = self.transfers.select(lambda t: t.direction == FileTransfer.DATASTORE_TO_WORKER)
-        return [transfer.command for transfer in datastore_to_worker]
+        return [transfer.command(datastore) for transfer in datastore_to_worker]
 
-    @property
     def worker_commands(self):
 
         task_commands = [command.command for command in self.commands.sort_by(TaskCommand.sort_order)]
         return [' && '.join(task_commands)]
         
-    @property
-    def finalize(self):
+    def finalize(self, datastore):
 
         worker_to_datastore = self.transfers.select(lambda t: t.direction == FileTransfer.WORKER_TO_DATASTORE)
-        return [transfer.command for transfer in worker_to_datastore]
+        return [transfer.command(datastore) for transfer in worker_to_datastore]
         
-    @property
     def clean_up(self):
 
         worker_to_datastore = self.transfers.select(lambda t: t.direction == FileTransfer.WORKER_TO_DATASTORE)
         return ['rm %s' % transfer.path for transfer in worker_to_datastore]
-
 
     @property
     def available(self):

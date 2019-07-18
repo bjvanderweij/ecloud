@@ -27,6 +27,10 @@ class Controller(MqttClient):
     def create_worker(self, n=1, keep_alive=None):
         return {'n':n, 'keep_alive':keep_alive}
 
+    @action
+    def deal_task(self, worker_id, task):
+        return {'worker_id':worker_id, 'task':task}
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=actions)
