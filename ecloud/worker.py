@@ -12,6 +12,9 @@ class Worker(MqttClient):
         self.topics = ['workers/{}'.format(self.worker_id)]
         # Topic to broadcast on
         self.broadcast = 'workers'
+        # Ping the boss every 10 seconds when waiting for tasks
+        self.interval = 10
+        self.result = None
 
     def do(self, *args, **kwargs):
         super().do(self.broadcast, *args, **kwargs)
@@ -19,46 +22,70 @@ class Worker(MqttClient):
     # Listen for commands 
     def start(self):
         self.connect()
-        self.do(self.ready)
-        self.loop_forever()
+        self.loop_start()
+        self.wait_loop()
 
     def hello(self):
         return {'worker_id':self.worker_id}
 
     def ready(self):
-        return {'worker_id':self.worker_id}
-
-    def task_result(self, succeeded, info):
         return {
             'worker_id':self.worker_id,
-            'success':succeeded,
-            'info':info
+            'last_result':self.result
+        }
+
+    def task_result(self, info):
+        return {
+            'worker_id':self.worker_id,
+            'result':result
+        }
+
+    def exception(self, exception, tb):
+        return {
+            'exception':str(exception),
+            'traceback':tb,
+        }
+
+    def _make_result(self, result):
+        if isinstance(result, Exception):
+            return {
+                'success': False,
+                'return_code': None,
+                'stderr': None,
+                'command':r.command,
+                'exception':str(result),
+            }
+        return {
+            'success': result.returncode == 0,
+            'return_code': result.returncode,
+            'stderr': result.stderr.decode(),
+            'command':r.args,
         }
 
     def perform_commands(self, commands):
         for cmd in commands:
             try:
                 r = self.exec([cmd], pwd=self.worker_home_dir, shell=True)
-            except:
-                self.do(self.task_result, False, (
-                    'Worker {} failed to execute task\n'.format(r.returncode) +
-                    'Command: {}\n'.format(r.args) +
-                    'Exception: {}\n'.format(traceback.format_exc())
-                ))
-                return
+            except Exception as e:
+                self.do(self.exception, e, traceback.format_exc())
+                r = exception
+                r.traceback = traceback.format_exc()
+                r.command = cmd
+                break
             if r.returncode != 0:
-                self.do(self.task_result, False, (
-                    'Task failed with return code {}\n'.format(r.returncode) +
-                    'Command: {}\n'.format(r.args) +
-                    'Stderr: {}\n'.format(r.stderr.decode())
-                ))
-                return
-        self.do(self.task_result, True, 'Task succeeded')
+                break
+        self.result = self._make_result(r)
+
+    async def wait_loop(self):
+        while True:
+            if self.commands != None:
+                self.perform_commands()
+                self.commands = None
+            self.do(self.ready, self.result)
+            asyncio.sleep(self.interval)
 
     def handle_task(self, commands):
-        print(commands)
-        self.perform_commands(commands)
-        self.do(self.ready)
+        self.commands = commands
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

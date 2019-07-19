@@ -1,7 +1,7 @@
 [
-        {"key":"0", "cmd":"echo I should fail to fetch dependencies.", "results":[], "requires":["non-existent-file"]},
-        {"key":"1", "cmd":"echo I should fail because of unmet dependencies.", "results":[], "depends-on":["0"]},
-        {"key":"2", "cmd":["printf \"echo I should fail\n>&2 echo This error message should end up in the log.\nexit 1\" > script.sh", "chmod +x script.sh", "bash script.sh"], "results":[]},
-        {"key":"3", "cmd":["echo 3.42 > intermediate-result"], "results":["intermediate-result"]},
-        {"key":"4", "cmd":["sleep 3", "mv dependency result"], "results":[["result", "TEST_SUCCEEDED"]], "depends-on":["3"], "requires":[["intermediate-result", "dependency"]]}
+        {"key":"0", "commands":"echo I should fail to fetch dependencies.", "results":[], "requirements":["non-existent-file"]},
+        {"key":"1", "commands":"echo I should fail because of unmet dependencies.", "results":[], "dependencies":["0"]},
+        {"key":"2", "commands":["printf \"echo I should fail\n>&2 echo This error message should end up in the log.\nexit 1\" > script.sh", "chmod +x script.sh", "bash script.sh"], "results":[]},
+        {"key":"3", "commands":["echo 3.42 > intermediate-result"], "results":["intermediate-result"]},
+        {"key":"4", "commands":["sleep 3", "mv dependency result"], "results":[["result", "TEST_SUCCEEDED"]], "dependencies":["3"], "requirements":[["intermediate-result", "dependency"]]}
 ]
