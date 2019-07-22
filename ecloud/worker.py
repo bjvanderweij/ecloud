@@ -1,10 +1,10 @@
 from mqtt import MqttClient
 from util import logger
-import argparse, settings, time, traceback
+import argparse, settings, time, traceback, asyncio
 
 class Worker(MqttClient):
 
-    def __init__(self, worker_id, broker_url, *args, **kwargs):
+    def __init__(self, worker_id, broker_url, *args, home_dir=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.worker_id = worker_id
         self.broker_url = broker_url
@@ -15,6 +15,9 @@ class Worker(MqttClient):
         # Ping the boss every 10 seconds when waiting for tasks
         self.interval = 10
         self.result = None
+        self.commands = None
+        if home_dir is not None:
+            self.worker_home_dir = home_dir
 
     def do(self, *args, **kwargs):
         super().do(self.broadcast, *args, **kwargs)
@@ -23,7 +26,10 @@ class Worker(MqttClient):
     def start(self):
         self.connect()
         self.loop_start()
-        self.wait_loop()
+        asyncio.run(self.start_loop())
+
+    async def start_loop(self):
+        await asyncio.gather(self.wait_loop())
 
     def hello(self):
         return {'worker_id':self.worker_id}
@@ -31,7 +37,7 @@ class Worker(MqttClient):
     def ready(self):
         return {
             'worker_id':self.worker_id,
-            'last_result':self.result
+            'result':self.result
         }
 
     def task_result(self, info):
@@ -52,20 +58,20 @@ class Worker(MqttClient):
                 'success': False,
                 'return_code': None,
                 'stderr': None,
-                'command':r.command,
+                'command':result.command,
                 'exception':str(result),
             }
         return {
             'success': result.returncode == 0,
             'return_code': result.returncode,
             'stderr': result.stderr.decode(),
-            'command':r.args,
+            'command':result.args,
         }
 
-    def perform_commands(self, commands):
-        for cmd in commands:
+    def perform_commands(self):
+        for cmd in self.commands:
             try:
-                r = self.exec([cmd], pwd=self.worker_home_dir, shell=True)
+                r = self.exec(cmd, pwd=self.worker_home_dir, shell=True)
             except Exception as e:
                 self.do(self.exception, e, traceback.format_exc())
                 r = exception
@@ -78,19 +84,21 @@ class Worker(MqttClient):
 
     async def wait_loop(self):
         while True:
-            if self.commands != None:
-                self.perform_commands()
-                self.commands = None
-            self.do(self.ready, self.result)
-            asyncio.sleep(self.interval)
+            if self.commands == None:
+                self.do(self.ready)
+            await asyncio.sleep(self.interval)
 
-    def handle_task(self, commands):
-        self.commands = commands
+    def handle_deal_task(self, download, task, upload, cleanup):
+        self.commands = download + task + upload + cleanup
+        self.perform_commands()
+        self.commands = None
+        self.do(self.ready)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('worker_id', type=int)
     parser.add_argument('broker_url')
+    parser.add_argument('--home_dir', help='directory in which to work')
     parser.add_argument('--hello', action='store_true')
     parser.add_argument('-s', '--sleep', action='store_true')
     parser.add_argument('-q', '--qos', type=int, choices=[0,1,2], default=1)
@@ -98,7 +106,7 @@ if __name__ == '__main__':
 
     if args.sleep:
         time.sleep(settings.WORKER_WAKEUP_TIME)
-    worker = Worker(args.worker_id, args.broker_url, qos=args.qos)
+    worker = Worker(args.worker_id, args.broker_url, qos=args.qos, home_dir=args.home_dir)
     if args.hello:
         worker.connect()
         worker.do(worker.hello)

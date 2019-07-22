@@ -12,12 +12,12 @@ class MqttClient(mqtt.Client):
         self.enable_logger(logger)
 
     def exec(self, cmd, pwd=None, shell=False):
-        logger.info(cmd)
+        logger.debug(cmd)
         r = subprocess.run(cmd, capture_output=True, shell=shell)
         stdout = r.stdout.decode()
         stderr = r.stderr.decode()
-        logger.info(stdout)
-        logger.warning(stderr)
+        logger.debug(stdout)
+        logger.warning(stderr.strip())
         return r
 
     def connect(self):
@@ -36,7 +36,7 @@ class MqttClient(mqtt.Client):
         self.publish_json(topic, message)
 
     def publish_json(self, topic, payload):
-        print('publishing {} to {}'.format(payload, topic))
+        #print('publishing {} to {}'.format(payload, topic))
         self.publish(topic, json.dumps(payload).encode())
 
     def on_connect(self, client, userdata, flags, rc):
@@ -45,7 +45,8 @@ class MqttClient(mqtt.Client):
             logger.info('subscribed to {}'.format(topic))
 
     def handle(self, mqtt_message, *, msg_type, payload={}):
-        logger.info('Handling {} {} on topic {}'.format(msg_type, payload, mqtt_message.topic))
+        logger.debug('Handling {} on topic {}. Contents: {}'.format(msg_type, mqtt_message.topic, payload))
+        #print('Handling {} {} on topic {}'.format(msg_type, payload, mqtt_message.topic))
         handler = getattr(self, 'handle_{}'.format(msg_type))
         handler(**payload)
 

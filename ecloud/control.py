@@ -1,6 +1,6 @@
 from mqtt import MqttClient
 from functools import wraps
-import argparse, settings
+import argparse, settings, json, time
 
 actions = []
 
@@ -16,6 +16,15 @@ def action(f):
 class Controller(MqttClient):
 
     @action
+    def push_tasks_batch(self, tasks_path):
+        with open(tasks_path) as f:
+            tasks = json.loads(f.read())
+        for i in range(len(tasks) // 10):
+            print('pushing batch {}/{}'.format(i, len(tasks) // 10))
+            controller.do('control', self.push_tasks, tasks[i*10:(i+1)*10])
+            time.sleep(.1)
+        return {}
+
     def push_tasks(self, tasks):
         return {'tasks':tasks}
 
@@ -43,3 +52,16 @@ if __name__ == '__main__':
     controller.connect()
     controller.do('control', getattr(controller, args.action), *args.args)
 
+# Actions from admin.py to be implemented:
+# show_task(task_id):
+# show_context():
+# show_task_commands(task_id):
+# show_task_dependencies(task_id):
+# show_workers():
+# print_task(task):
+# show_queued():
+# show_failed():
+# show_succeeded():
+# show_in_progress():
+# redo_task(task_id):
+# retry_failed():

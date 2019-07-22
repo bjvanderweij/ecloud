@@ -3,7 +3,7 @@ import os
 ROOT_DIR='/home/ubuntu/ecloud/'
 HOME_DIR='/home/ubuntu/'
 
-BROKER_URL = 'localhost'
+BROKER_URL = 'boss.rhythm-uva.surf-hosted.nl'
 WORKER_WAKEUP_TIME = 30
 
 DEBUG = True
@@ -20,6 +20,7 @@ MAX_API_ATTEMPTS = 5
 #DATABASE = {'provider':'postgres', 'user':'ecloud', 'password':'ecloud', 'database':'ecloud', 'host':'localhost'}
 DATABASE = {'provider':'mysql', 'user':'ecloud', 'password':'ecloudecloud', 'database':'ecloud', 'host':'localhost'}
 DATASTORE_DIR = '/data'
+LOCAL_DATASTORE_DIR = 'data/'
 
 EMAIL_ENABLED = False
 EMAIL_USERNAME = ''
