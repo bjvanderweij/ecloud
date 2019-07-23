@@ -23,6 +23,12 @@ A task consists of four sets of commands:
 
 `pop-task.py`, `hello.py`, `completed-task.py` are a poor man's server endpoints that are called by workers over ssh.
 
+# Datastore setup
+
+fstab:
+
+/dev/vdb        /data           xfs     defaults           0       2
+
 # Setup
 
 Worker template need BOSS public key

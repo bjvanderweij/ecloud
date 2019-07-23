@@ -23,13 +23,35 @@ class FileTransfer():
 
 class NetworkFileTransfer(FileTransfer):
 
-    @property
+    def __init__(self, source, destination, source_host=None, destination_host=None):
+        self._source = source
+        self._destination = destination
+        self.source_host = source_host
+        self.destination_host = destination_host
+
+    @property 
+    def source(self):
+        if self.source_host is None:
+            return self._source
+        return '{}:{}'.format(self.source_host, self._source)
+
+    @property 
+    def destination(self):
+        if self.destination_host is None:
+            return self._destination
+        return '{}:{}'.format(self.destination_host, self._destination)
+
+    @property 
     def command(self):
         return ' '.join(['scp', '-oStrictHostKeyChecking=no', self.source, self.destination])
 
 class Task():
 
-    def __init__(self, id, commands, results, init=False, dependencies=[], requirements=[]):
+    def __init__(self, id, commands, results,
+            init=False,
+            overwrite_result=True,
+            dependencies=[],
+            requirements=[]):
         self.id = id
         self.commands = commands if not isinstance(commands, str) else [commands]
         self.results = results
@@ -37,15 +59,14 @@ class Task():
         self.requirements = requirements
         self.results = results
         self.init = init # flag used to indicate this task is a worker initialization task
+        self.overwrite_result = overwrite_result
 
     def make_download(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        source = os.path.join(settings.LOCAL_DATASTORE_DIR, source)
         return FileTransfer(source, destination)
 
     def make_upload(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        destination = os.path.join(settings.LOCAL_DATASTORE_DIR, destination)
         return FileTransfer(source, destination)
 
     @property
@@ -59,10 +80,6 @@ class Task():
     @property
     def download(self):
         return [d.command for d in self.downloads]
-
-    @property
-    def task(self):
-        return self.commands
         
     @property
     def upload(self):
@@ -81,15 +98,11 @@ class NetworkTask(Task):
 
     def make_download(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        source = os.path.join(settings.DATASTORE_DIR, source)
-        source = '{}:{}'.format(self.datastore, source)
-        return NetworkFileTransfer(source, destination)
+        return NetworkFileTransfer(source, destination, source_host=self.datastore)
 
     def make_upload(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        destination = os.path.join(settings.DATASTORE_DIR, destination)
-        destination = '{}:{}'.format(self.datastore, destination)
-        return NetworkFileTransfer(source, destination)
+        return NetworkFileTransfer(source, destination, destination_host=self.datastore)
 
 class Worker():
 
@@ -99,6 +112,7 @@ class Worker():
         self.task_id = None
         self.ip = None
         self.keep_alive = keep_alive
+        self.initialized = False
 
     @property
     def dict(self):
@@ -142,6 +156,13 @@ class WorkerPool(dict):
         if len(self.available) > 0:
             return self.available[0]
 
+    def delete(self, worker_id):
+        del self[worker_id]
+        if worker_id in self.busy:
+            self.busy.pop(self.busy.index(worker_id))
+        if worker_id in self.available:
+            self.available.pop(self.available.index(worker_id))
+
     def assign(self, worker_id, task_id):
         """Assign a worker to a task."""
         if not worker_id in self.available:
@@ -163,6 +184,22 @@ class TaskQueue(dict):
     blocked=set() # tasks that cannot run because dependencies failed
     failed=set()
     succeeded=set()
+
+    def max_width(self):
+        """Return the maximum number of tax that can be run in parallel down the line.
+
+        Useful for keeping Workers around.
+        """
+        # TODO
+        ...
+
+    def is_done(self):
+        return len(self.pending) == 0
+
+    def retry_failed(self):
+        for task_id in self.failed:
+            move_task(self.pending, task_id=task_id)
+        self.update_queue()
 
     def get_available(self):
         """Pop a task of the queue. Return None if no tasks are available."""

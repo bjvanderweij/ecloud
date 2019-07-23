@@ -25,8 +25,16 @@ class Controller(MqttClient):
             time.sleep(.1)
         return {}
 
-    def push_tasks(self, tasks):
-        return {'tasks':tasks}
+    def push_tasks(self, tasks, merge_strategy=None):
+        return {'tasks':tasks, 'merge_strategy':merge_strategy}
+
+    @action
+    def terminate_workers(self):
+        pass
+
+    @action
+    def terminate_workers_by_template(self):
+        pass
 
     @action
     def status(self):

@@ -8,7 +8,6 @@ class Server(MqttClient):
     topics = ['workers', 'control']
     cache_path = 'cache/workers_and_queue.pickle'
     init_task = None # tasks to be executed on a worker after it comes online.
-    initialized = set()
 
     def __init__(self, *args, reset=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -36,8 +35,9 @@ class Server(MqttClient):
 
     def get_available_worker(self):
         worker_id = self.worker_pool.get_available()
+        worker = self.worker_pool.get(worker_id)
         if (worker_id is not None and 
-                not worker_id in self.initialized and
+                not worker.initialized and
                 self.init_task is not None):
             logger.info('Initializing worker {}'.format(worker_id))
             self.worker_pool.assign(worker_id, 'init')
@@ -46,6 +46,7 @@ class Server(MqttClient):
             return worker_id
 
     def assign_task(self, worker_id, task_id):
+        """Update task_pool and worker pool state and send task to worker."""
         task = self.task_queue[task_id]
         self.worker_pool.assign(worker_id, task_id)
         self.task_queue.begin(task_id)
@@ -89,7 +90,7 @@ class Server(MqttClient):
         """
         return {
             'download':task.download,
-            'task':task.task,
+            'task':task.commands,
             'upload':task.upload,
             'cleanup':task.cleanup,
         }
@@ -117,7 +118,7 @@ class Server(MqttClient):
                 if worker.task_id == 'init':
                     if result['success']:
                         logger.info('Worker {} initialized successfully'.format(worker_id))
-                        self.initialized.add(worker_id)
+                        worker.initialized = True
                     else:
                         print(result)
                         print('Failed to initialize worker. Stderr: {}\nCommand: {}'.format(result['stderr'], result['command']))
@@ -130,12 +131,8 @@ class Server(MqttClient):
     def create_task(self, task_dict):
         return Task(**task_dict)
 
-    def find_results(self):
-        raise NotImplementedError()
-
-    def handle_push_tasks(self, *, tasks, merge_strategy=None, skip_existing=False):
+    def handle_push_tasks(self, *, tasks, merge_strategy=None):
         logger.info('Queueing tasks.')
-        existing_results = self.find_results()
         for task_dict in tasks:
             task = self.create_task(task_dict)
             if task.init:
@@ -143,11 +140,7 @@ class Server(MqttClient):
                     logger.warning('Replacing init task')
                 self.init_task = task
             else:
-                results_exist = all(r in existing_results for r in task.results)
-                if skip_existing and results_exist:
-                    self.task_queue.add_as_succeeded(task)
-                else:
-                    self.task_queue.push(task, merge_strategy=merge_strategy)
+                self.task_queue.push(task, merge_strategy=merge_strategy)
 
     def handle_status(self):
         print('{} workers created.\n'.format(self.worker_pool.amount) +
@@ -179,6 +172,6 @@ if __name__ == '__main__':
         print('succeeded ' + str(queue.succeeded))
         print('failed ' + str(queue.failed))
         task = queue[task_id]
-        print(task.task)
+        print(task.commands)
         task_id = queue.pop()
 

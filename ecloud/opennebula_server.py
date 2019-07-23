@@ -1,7 +1,7 @@
 from server import Server
 from util import logger, get_pub_key
 from ecloud import NetworkTask, Error
-import argparse, pyone, settings
+import argparse, pyone, settings, time
 
 class EcloudError(Error):
     pass
@@ -71,26 +71,55 @@ class OpenNebulaServer(Server):
         worker.one_id = one_id
         return worker
 
-    def datastore_file_tree(self):
-        find = ['find',  settings.DATASTORE_DIR, '-printf', '\'%P\n\'']
+    def exists_in_datastore(self, path):
+        find = ['find',  path]
         command = ['ssh', '-oStrictHostKeyChecking=no', self.datastore_address] + find
         result = self.exec(command)
-        return result.stdout.decode()
+        return result.returncode == 0
 
-    def find_results(self):
-        return self.datastore_file_tree().split('\n')
+    def assign_task(self, worker_id, task_id):
+        """Assign task only if results exist in datastore."""
+        task = self.task_queue[task_id]
+        if task.overwrite_result:
+            return super().assign_task(worker_id, task_id)
+        results_exist = [
+            self.exists_in_datastore(transfer.destination) 
+            for transfer in task.uploads]
+        if all(results_exist):
+            self.task_queue.begin(task_id)
+            self.task_queue.finish(task_id, {'success':True})
+        else:
+            return super().assign_task(worker_id, task_id)
 
     def heartbeat(self):
         if self.address is None:
             self.address = self.find_or_instantiate(settings.BOSS_TEMPLATE, settings.VIRTUAL_NETWORK_ID)
             if self.address is not None:
                 logger.info('Myself found: {}'.format(self.address))
+            else:
+                logger.info('Waiting for datastore'.format(self.address))
+                return
         if self.datastore_address is None:
             ds_address = self.find_or_instantiate(settings.DATASTORE_TEMPLATE, settings.VIRTUAL_NETWORK_ID)
             if ds_address is not None:
                 self.datastore_address = '{}@{}'.format('ubuntu', ds_address)
                 logger.info('Datastore found: {}'.format(self.datastore_address))
         super().heartbeat()
+
+    def terminate_worker(self, worker_id):
+        print('Terminating worker')
+        worker = self.worker_pool[worker_id]
+        self.one.vm.action('terminate', int(worker.one_id))
+        self.worker_pool.delete(worker_id)
+
+    def handle_terminate_workers(self):
+        for worker in self.worker_pool.keys():
+            self.terminate_worker(worker)
+
+    def handle_terminate_workers_by_template(self):
+        for worker in self.vm_by_template(settings.WORKER_TEMPLATE):
+            print('Terminating worker VM with ID {}'.format(worker.ID))
+            self.one.vm.action('terminate', worker.ID)
 
     def handle_hello(self, worker_id):
         """Handle worker online message."""
@@ -136,8 +165,11 @@ class OpenNebulaServer(Server):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-q', '--qos', type=int, choices=[0,1,2], default=1)
+    parser.add_argument('-s', '--sleep', action='store_true')
     parser.add_argument('-r', '--reset', action='store_true')
     args = parser.parse_args()
 
+    if args.sleep:
+        time.sleep(30)
     server = OpenNebulaServer(qos=args.qos, reset=args.reset)
     server.start()
