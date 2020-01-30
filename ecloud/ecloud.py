@@ -53,6 +53,7 @@ class Task():
             dependencies=[],
             requirements=[]):
         self.id = id
+        self.datastore = settings.LOCAL_DATASTORE_DIR
         self.commands = commands if not isinstance(commands, str) else [commands]
         self.results = results
         self.dependencies = set(dependencies)
@@ -63,12 +64,15 @@ class Task():
 
     def make_download(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        return FileTransfer(source, destination)
+        return FileTransfer(self.from_datastore(source), destination)
 
     def make_upload(self, r):
         source, destination = r if not isinstance(r, str) else (r, r)
-        return FileTransfer(source, destination)
+        return FileTransfer(source, self.from_datastore(destination))
 
+    def from_datastore(self, rel_path):
+        return os.path.join(self.datastore, rel_path)
+        
     @property
     def downloads(self):
         return [self.make_download(r) for r in self.requirements]
@@ -135,13 +139,16 @@ class WorkerPool(dict):
             id = self.next_id
             self.next_id = id + 1
         worker = Worker(id, **kwargs)
-        self.busy.append(id)
         self[id] = worker
         self.busy.insert(0, id)
         return worker
 
     def move(self, worker_id, source, destination):
-        source.pop(source.index(worker_id))
+        try:
+            source.pop(source.index(worker_id))
+        except ValueError:
+            logger.warning('Attempting remove worker from queue that does not contain it.')
+            return
         destination.append(worker_id)
 
     def lock(self, worker_id):
@@ -231,7 +238,7 @@ class TaskQueue(dict):
             self.fail(task_id, result)
 
     def fail(self, failed_task_id, result={'stderr': 'dependencies failed'}):
-        logger.info('Task {} failed with stderr: {}\n{}'.format(failed_task_id, result['stderr'].strip(), result['command']))
+        logger.info('Command "{}" of task {} failed with stderr: {}'.format(result.get('command', 'none'), failed_task_id, result['stderr'].strip()))
         self[failed_task_id].result = result
         self.move_task(self.failed, task_id=failed_task_id)
         for task_id in self.pending | self.queued:

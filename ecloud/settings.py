@@ -1,10 +1,12 @@
 import os
 
-ROOT_DIR='/home/ubuntu/ecloud/'
+ROOT_DIR='/app/ecloud/'
 HOME_DIR='/home/ubuntu/'
 
 BROKER_URL = 'localhost'
 WORKER_WAKEUP_TIME = 30
+
+LOCAL_DATASTORE_DIR = "/data/"
 
 DEBUG = True
 

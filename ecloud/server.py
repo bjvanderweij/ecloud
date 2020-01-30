@@ -1,16 +1,16 @@
-import asyncio, json, argparse, pickle
-from ecloud import TaskQueue, WorkerPool
+import asyncio, json, argparse, pickle, settings
+from ecloud import TaskQueue, WorkerPool, Task
 from util import logger, os
 from mqtt import MqttClient
 
 class Server(MqttClient):
 
-    topics = ['workers', 'control']
     cache_path = 'cache/workers_and_queue.pickle'
     init_task = None # tasks to be executed on a worker after it comes online.
 
     def __init__(self, *args, reset=False, **kwargs):
-        super().__init__(*args, **kwargs)
+        topics = ['workers', 'control']
+        super().__init__(*args, topics=topics, **kwargs)
         if not reset and os.path.exists(self.cache_path):
             self.load_state()
         else:
@@ -31,7 +31,23 @@ class Server(MqttClient):
 
     def on_message(self, client, userdata, msg):
         message = json.loads(msg.payload.decode())
-        self.event_loop.call_soon_threadsafe(asyncio.gather, self.handle_async(msg, **message))
+        self.event_loop.call_soon_threadsafe(
+            asyncio.gather, self.handle_async(msg, **message))
+
+    def initialize_worker(self, worker):
+        logger.info('Initializing worker {}'.format(worker.id))
+        self.worker_pool.assign(worker.id, 'init')
+        self.worker_do(worker.id, self.deal_task, self.init_task)
+
+    def finalize_worker(self, worker, result):
+        if result['success']:
+            logger.info(
+                'Worker {} initialized successfully'.format(worker.id))
+            worker.initialized = True
+        else:
+            logger.warning(
+                'Failed to initialize worker {}. Stderr: {}\nCommand: {}'.format(
+                    worker.id, result['stderr'], result['command']))
 
     def get_available_worker(self):
         worker_id = self.worker_pool.get_available()
@@ -39,9 +55,7 @@ class Server(MqttClient):
         if (worker_id is not None and 
                 not worker.initialized and
                 self.init_task is not None):
-            logger.info('Initializing worker {}'.format(worker_id))
-            self.worker_pool.assign(worker_id, 'init')
-            self.worker_do(worker_id, self.deal_task, self.init_task)
+            self.initialize_worker(worker)
         else:
             return worker_id
 
@@ -63,7 +77,7 @@ class Server(MqttClient):
 
     async def control_loop(self):
         while True:
-            self.save_state()
+            #self.save_state()
             self.heartbeat()
             await asyncio.sleep(self.control_interval)
 
@@ -95,6 +109,9 @@ class Server(MqttClient):
             'cleanup':task.cleanup,
         }
 
+    def create_task(self, task_dict):
+        return Task(**task_dict)
+
     def handle_ready(self, worker_id, result=None):
         """Handle worker ready message.
         
@@ -116,20 +133,15 @@ class Server(MqttClient):
             self.worker_pool.free(worker_id)
             if worker.task_id is not None:
                 if worker.task_id == 'init':
-                    if result['success']:
-                        logger.info('Worker {} initialized successfully'.format(worker_id))
-                        worker.initialized = True
-                    else:
-                        print(result)
-                        print('Failed to initialize worker. Stderr: {}\nCommand: {}'.format(result['stderr'], result['command']))
+                    self.finalize_worker(worker, result)
                 else:
                     self.task_queue.finish(worker.task_id, result)
 
     def handle_exception(self, worker_id, exception, traceback):
         logger.error('Worker exception :{}'.format(exception))
 
-    def create_task(self, task_dict):
-        return Task(**task_dict)
+    def handle_retry_failed(self):
+        self.task_queue.retry_failed()
 
     def handle_push_tasks(self, *, tasks, merge_strategy=None):
         logger.info('Queueing tasks.')
@@ -143,13 +155,17 @@ class Server(MqttClient):
                 self.task_queue.push(task, merge_strategy=merge_strategy)
 
     def handle_status(self):
-        print('{} workers created.\n'.format(self.worker_pool.amount) +
+        logger.info('{} workers created.\n'.format(len(self.worker_pool)) +
             '{} queued of which {} available.'.format(len(self.task_queue.queued), len(self.task_queue.available)) +
             '{} tasks in progress.'.format(len(self.worker_pool.busy)) + 
             '{} succeeded and {} failed.'.format(len(self.task_queue.succeeded), len(self.task_queue.failed)))
 
+    def instantiate(self, worker):
+        raise NotImplementedError
+
     def create_worker(self, keep_alive=None):
         worker = self.worker_pool.create(keep_alive=keep_alive)
+        self.instantiate(worker)
         logger.info('Created worker with ID {}'.format(worker.id))
         return worker
 
@@ -159,19 +175,11 @@ class Server(MqttClient):
             self.create_worker(keep_alive=keep_alive)
 
 if __name__ == '__main__':
-    queue = TaskQueue()
-    with open('test-tasks.json') as f:
-        tasks = json.loads(f.read())
-        for task_dict in tasks:
-            task = Task(datastore='localhost', **task_dict)
-            queue.push(task)
-    task_id = queue.pop()
-    while task_id != None:
-        print('pending ' + str(queue.pending))
-        print('queued ' + str(queue.queued))
-        print('succeeded ' + str(queue.succeeded))
-        print('failed ' + str(queue.failed))
-        task = queue[task_id]
-        print(task.commands)
-        task_id = queue.pop()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-q', '--qos', type=int, choices=[0,1,2], default=1)
+    parser.add_argument('-r', '--reset', action='store_true')
+    parser.add_argument('--broker_url', default=settings.BROKER_URL)
 
+    args = parser.parse_args()
+    server = Server(qos=args.qos, reset=args.reset, broker_url=args.broker_url)
+    server.start()

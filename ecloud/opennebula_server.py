@@ -68,7 +68,7 @@ class OpenNebulaServer(Server):
         context['START_SCRIPT'] += start_script
         one_id = self.instantiate(
             settings.WORKER_TEMPLATE, update={'TEMPLATE':{'CONTEXT':context}})
-        worker.one_id = one_id
+        worker.one_id = int(one_id)
         return worker
 
     def exists_in_datastore(self, path):
@@ -106,20 +106,65 @@ class OpenNebulaServer(Server):
                 logger.info('Datastore found: {}'.format(self.datastore_address))
         super().heartbeat()
 
+    def terminate_workers(self):
+        workers = list(self.worker_pool.keys())
+        for worker in workers:
+            self.terminate_worker(worker)
+
     def terminate_worker(self, worker_id):
-        print('Terminating worker')
+        logger.info('Terminating worker {}'.format(worker_id))
         worker = self.worker_pool[worker_id]
         self.one.vm.action('terminate', int(worker.one_id))
         self.worker_pool.delete(worker_id)
 
+    def terminate_workers_by_template(self):
+        logger.info('Terminating all worker-template VMs.')
+        for worker in self.vm_by_template(settings.WORKER_TEMPLATE):
+            logger.info('Terminating worker VM with ID {}'.format(worker.ID))
+            self.one.vm.action('terminate', worker.ID)
+
+    def initialize_worker(self, worker, *args, **kwargs):
+        self.attach_to_internet(worker)
+        super().initialize_worker(worker, *args, **kwargs)
+
+    def finalize_worker(self, worker, *args, **kwargs):
+        self.detach_from_internet(worker)
+        super().finalize_worker(worker, *args, **kwargs)
+
+    def attach_to_internet(self, worker, network='internet', network_uname='oneadmin'):
+        logger.info('Attaching internet NIC to {} ({})'.format(worker.one_id, worker.id))
+        # Check if internet NIC has already been attached
+        info = self.one.vm.info(worker.one_id)
+        nics = info.TEMPLATE['NIC']
+        nics = (nics if isinstance(nics, list) else [nics])
+        matches = [nic for nic in nics if nic['NETWORK_UNAME'] == network_uname]
+        if len(matches) == 0:
+            self.one.vm.attachnic(
+                worker.one_id,
+                'NIC = [ NETWORK = "{}", NETWORK_UNAME = "{}" ]'.format(
+                    network, network_uname))
+        else:
+            logger.warning('Ignoring attempt to attach superfluous internet NIC to worker {}.'.format(worker.id))
+
+    def detach_from_internet(self, worker, network='internet', network_uname='oneadmin'):
+        logger.info('Detaching internet NIC to {} ({})'.format(worker.one_id, worker.id))
+        info = self.one.vm.info(worker.one_id)
+        nics = info.TEMPLATE['NIC']
+        nics = (nics if isinstance(nics, list) else [nics])
+        matches = [nic for nic in info.TEMPLATE['NIC'] if nic['NETWORK_UNAME'] == network_uname]
+        if len(matches) > 0:
+            if len(matches) > 1:
+                logger.warning('More than one internet NIC found on worker {}.'.format(worker.id))
+            for nic in matches:
+                self.one.vm.detachnic(worker.one_id, int(nic['NIC_ID']))
+        else:
+            logger.warning('Trying to detach non-existent NIC from {}.'.format(worker.id))
+
     def handle_terminate_workers(self):
-        for worker in self.worker_pool.keys():
-            self.terminate_worker(worker)
+        self.terminate_workers()
 
     def handle_terminate_workers_by_template(self):
-        for worker in self.vm_by_template(settings.WORKER_TEMPLATE):
-            print('Terminating worker VM with ID {}'.format(worker.ID))
-            self.one.vm.action('terminate', worker.ID)
+        self.terminate_workers_by_template()
 
     def handle_hello(self, worker_id):
         """Handle worker online message."""
@@ -127,6 +172,9 @@ class OpenNebulaServer(Server):
             logger.warning('Implicitly creating worker')
             self.worker_pool.create(worker_id=worker_id)
         worker = self.worker_pool.get(worker_id)
+        if worker.ip is not None:
+            logger.warning('Ignoring duplicate hello message')
+            return
         worker.ip = self.vm_ip(settings.WORKER_TEMPLATE, settings.VIRTUAL_NETWORK_ID, vm_id=worker.one_id)
         logger.info('Setting ip of worker {} to {}'.format(worker_id, worker.ip))
         self.start_worker(worker)
@@ -167,9 +215,12 @@ if __name__ == '__main__':
     parser.add_argument('-q', '--qos', type=int, choices=[0,1,2], default=1)
     parser.add_argument('-s', '--sleep', action='store_true')
     parser.add_argument('-r', '--reset', action='store_true')
+    parser.add_argument('-k', '--kill_workers', action='store_true', )
     args = parser.parse_args()
 
     if args.sleep:
         time.sleep(30)
     server = OpenNebulaServer(qos=args.qos, reset=args.reset)
+    if args.kill_workers:
+        server.terminate_workers_by_template()
     server.start()

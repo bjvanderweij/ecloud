@@ -1,0 +1,8 @@
+[
+        {"id":"5", "init":true, "commands":[], "results":[]},
+        {"id":"0", "commands":"echo I should fail to fetch dependencies.", "results":[], "requirements":["non-existent-file"]},
+        {"id":"1", "commands":"echo I should fail because of unmet dependencies.", "results":[], "dependencies":["0"]},
+        {"id":"2", "commands":["printf \"echo I should fail\n>&2 echo This error message should end up in the log.\nexit 1\" > script.sh", "chmod +x script.sh", "sh script.sh"], "results":[]},
+        {"id":"3", "commands":["echo 3.42 > intermediate-result"], "results":["intermediate-result"]},
+        {"id":"4", "commands":["sleep 3", "mv dependency result"], "results":[["result", "TEST_SUCCEEDED"]], "dependencies":["3"], "requirements":[["intermediate-result", "dependency"]]}
+]

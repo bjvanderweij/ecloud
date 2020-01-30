@@ -5,9 +5,11 @@ class MqttClient(mqtt.Client):
 
     worker_home_dir = '/home/ubuntu'
 
-    def __init__(self, broker_url=settings.BROKER_URL, qos=0):
+    def __init__(self, topics=[], broker_url=settings.BROKER_URL, broker_port=1883, qos=0):
         super().__init__()
         self.broker_url = broker_url
+        self.broker_port = broker_port
+        self.topics = topics
         self.qos = qos
         self.enable_logger(logger)
 
@@ -22,7 +24,7 @@ class MqttClient(mqtt.Client):
 
     def connect(self):
         logger.info('connecting to {}'.format(self.broker_url))
-        super().connect(self.broker_url)
+        super().connect(self.broker_url, self.broker_port)
 
     def do(self, topic, message_f, *args, **kwargs):
         """Publish a message of type message_f.__name__ to

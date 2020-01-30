@@ -5,14 +5,14 @@ import argparse, settings, time, traceback, asyncio
 class Worker(MqttClient):
 
     def __init__(self, worker_id, broker_url, *args, home_dir=None, **kwargs):
-        super().__init__(*args, **kwargs)
+        # Topic to listen on
+        topics = ['workers/{}'.format(worker_id)]
+        super().__init__(*args, topics=topics, **kwargs)
         self.worker_id = worker_id
         self.broker_url = broker_url
-        # Topic to listen on
-        self.topics = ['workers/{}'.format(self.worker_id)]
         # Topic to broadcast on
         self.broadcast = 'workers'
-        # Ping the boss every 10 seconds when waiting for tasks
+        # Broadcast isalive every 10 seconds when waiting for tasks
         self.interval = 10
         self.result = None
         self.commands = None
@@ -52,6 +52,14 @@ class Worker(MqttClient):
             'traceback':tb,
         }
 
+    def _make_null_result(self):
+        return {
+            'success': True,
+            'return_code': 0,
+            'stderr': '',
+            'command':'',
+        }
+
     def _make_result(self, result):
         if isinstance(result, Exception):
             return {
@@ -69,6 +77,8 @@ class Worker(MqttClient):
         }
 
     def perform_commands(self):
+        # This just returns the last result, but should somehow summarize them
+        r = None
         for cmd in self.commands:
             try:
                 r = self.exec(cmd, pwd=self.worker_home_dir, shell=True)
@@ -80,7 +90,10 @@ class Worker(MqttClient):
                 break
             if r.returncode != 0:
                 break
-        self.result = self._make_result(r)
+        if r is None:
+            self.result = self._make_null_result()
+        else:
+            self.result = self._make_result(r)
 
     async def wait_loop(self):
         while True:
@@ -90,15 +103,22 @@ class Worker(MqttClient):
 
     def handle_deal_task(self, download, task, upload, cleanup):
         self.commands = download + task + upload + cleanup
-        self.perform_commands()
+        try:
+            self.perform_commands()
+        except Exception as e:
+            logger.warning('Worker exception: ' + str(e))
         self.commands = None
         self.do(self.ready)
+
+def start_worker(worker_id, broker_url, broker_port, home_dir=None, qos=1):
+    w = Worker(worker_id, broker_url, broker_port=broker_port, qos=qos, home_dir=home_dir)
+    w.start()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('worker_id', type=int)
     parser.add_argument('broker_url')
-    parser.add_argument('--home_dir', help='directory in which to work')
+    parser.add_argument('--home_dir', help='directory in which to do work')
     parser.add_argument('--hello', action='store_true')
     parser.add_argument('-s', '--sleep', action='store_true')
     parser.add_argument('-q', '--qos', type=int, choices=[0,1,2], default=1)
