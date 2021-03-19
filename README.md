@@ -1,33 +1,15 @@
-# ecloud
+# ECLOUD - distribute computation over machines connected to a network
 
-In a nutshell:
+I wrote this in the spring of 2019 to distribute tasks over a large number of VMs. It's basically a task queue that communicates with VMs over MQTT (don't ask).
+It keeps track of which tasks are finished and schedules tasks based on whether its dependencies are met.
+It also orchestrates moving data (simulation training data to the VMs and simulation results to virtual volumes) over the network.
 
-* the *boss* orchestrates the *worker* VMs
-* a task queue is stored in a database
-* results are stored on the *datastore*
-* tasks are stored in a queue and are run in parallel
-* tasks may depend on the results of other tasks
+This is a fairly hacky and ad-hoc solution that you should probably not try to use.
+There are far better existing solutions addressing this type of problem that I was blissfully unaware of.
 
-The boss, workers and datastore may be the same machine or any number of different virtual machines in a network.
-
-ecloud is a set of python scripts that automates deployment of virtual machines and handing out tasks. It's hacky, quick and dirty runs into race conditions and overloads the network as soon as too many tasks finish at once. Nevertheless, it's robust enough to save an enormous amount of time.
-
-All VMs communicate with a central VM (the "boss"), which instead of running a server contains a set of scripts that manipulate a database. Workers call these scripts over SSH. The database encodes the state of the whole system and is the only piece of persistent state in the system. Workers are created by a script that can be run from the boss or from elsewhere. Upon initialisation, worker VMs are told where the boss can be found on the network. The worker VMs are configured to run a script upon startup (after waiting for a fixed amount of time in the hope that the network will be up by then). The worker script will query the boss for a task. Having been dealt a task, the worker will try and execute it, record the results, send them to the datastore, and query the boss for another task. This process will repeat until the worker doesn't receive a new task from the boss at which point it will request the boss to be terminated and quietely await its inevitable fate.
-
-A task consists of four sets of commands:
-
-* downloading required software and data from a central datastore,  
-* running the task
-* uploading the results to the datastore
-* cleaning up
-
-`pop-task.py`, `hello.py`, `completed-task.py` are a poor man's server endpoints that are called by workers over ssh.
-
-# Datastore setup
-
-fstab:
-
-/dev/vdb        /data           xfs     defaults           0       2
+Nevertheless, I've used this tool to distribute simulations over 255 VMs (here I ran out of IP addresses) picking tasks (with inter-dependencies) off the task queue in parallel.
+As long as the tasks take sufficiently long (about a minute) to execute, it could handle this load without everything blowing up.
+It caused the computing resources provider to send me a worried email.
 
 # Setup
 
@@ -79,19 +61,3 @@ If this doesn't happen soon after opennebula reports the worker to be running, i
 
 6. Monitor progress with status
 
-
-
-
-# Settings.py
-
-Configuring datastore and worker templates
-
-# The database:
-
-Tasks, Workers, Context
-
-## Context:
-
-datastore
-boss_address
-(automatically set throught the ONE api)
